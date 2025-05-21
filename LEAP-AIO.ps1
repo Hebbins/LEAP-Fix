@@ -65,7 +65,6 @@ function Uninstall-LEAP {
 
 # Function to install LEAP
 function Install-LEAP {
-    # Updated to download from GitHub instead of dc.mlogicit.com.au
     $installerUrl = "https://github.com/Hebbins/LEAP-Fix/raw/main/LEAPDesktopX64Setup.exe"
     $installerPath = "$env:TEMP\LEAPDesktopX64Setup.exe"
     
