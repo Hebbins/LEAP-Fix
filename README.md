@@ -8,7 +8,7 @@ LEAP Legal Software has an uncanny ability to break, to the point where a typica
 This full reinstallation package fixing the majority of common issues and will save you hours of queue time waiting for a tech who's first task will be to do exactly this.<br/>
 I've managed to get a full reinstall down to roughly 3 minutes now, saving a ton of time.
 
-## Run the fix
+## Run the script
 If you have no plans on self hosting this script, or want to run it as a once off, you can run the most up to date version of this script copy and pasting the below command into an admin Powershell session, or by downloading ```LEAP-AIO.ps1``` and running it directly off the machine.<br/><br/>
 ```irm https://raw.githubusercontent.com/Hebbins/LEAP-Fix/refs/heads/main/LEAP-AIO.ps1 | iex```
 
