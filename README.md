@@ -20,7 +20,7 @@ Has been tested extensively, and is known to fix the following issues we encount
 If you have no plans on self hosting this script, or want to run it as a once off, you can run the most up to date version of this script copy and pasting the below command into an admin Powershell session, or by downloading ```LEAP-AIO.ps1``` and running it directly off the machine.<br/><br/>
 ```irm https://raw.githubusercontent.com/Hebbins/LEAP-Fix/refs/heads/main/LEAP-AIO.ps1 | iex```
 
-## Self Hosting (MSP / Internal IP Departments)
+## Self Hosting (MSP / Internal IT Departments)
 Self host the `fetch.php` file somewhere accessible.<br/>
 Open PowerShell and run the following command to run it: ```irm https://your-site/fetch.php```<br/>
 Bonus points, you can setup a subdomain and point it to an empty folder, and rename `fetch.php` to ```index.php``` so all you need to do is run ```irm https://subdomain.site.tld | iex```
