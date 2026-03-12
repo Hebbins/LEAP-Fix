@@ -15,6 +15,7 @@ Has been tested extensively, and is known to fix the following issues we encount
 - Random communication with LEAP server errors
 - Unable to open Emails, Documents and Spreadsheets from LEAP due to addin errors
 - Print to LEAP function not working
+- LEAP Crashing due to UNC pathed printers
 
 ## Run the script
 If you have no plans on self hosting this script, or want to run it as a once off, you can run the most up to date version of this script copy and pasting the below command into an admin Powershell session, or by downloading ```LEAP-AIO.ps1``` and running it directly off the machine.<br/><br/>
