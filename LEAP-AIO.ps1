@@ -91,9 +91,57 @@ function Install-LEAP {
     }
 }
 
+# Poisoned Printers
+function PrinterFix {
+    # 1. Look for printers starting with \\
+    $AllPrinters = Get-Printer
+    $PoisonedPrinters = $AllPrinters | Where-Object { $_.Name -like "\\*" }
+
+    if ($PoisonedPrinters.Count -eq 0) {
+        Write-Host "No Poisoned Printers Detected." -ForegroundColor Green
+        return
+    }
+
+    Write-Host "Detected $($PoisonedPrinters.Count) UNC-pathed printers that may cause winspool crashes." -ForegroundColor Yellow
+    Write-Host "------------------------------------------------"
+
+    # 2. Iterate through and ask for confirmation
+    foreach ($Printer in $PoisonedPrinters) {
+        $OldName = $Printer.Name
+        $CleanName = $OldName.Replace("\\", "").Replace("\", "_") + " (Fixed)"
+        
+        Write-Host "`nFound: $OldName" -ForegroundColor White
+        $Choice = Read-Host "Would you like to convert this to a Local Port fix? [Y]es / [N]o"
+
+        if ($Choice -eq 'y' -or $Choice -eq 'yes') {
+            try {
+                Write-Host "Processing $OldName..." -NoNewline
+                
+                if (-not (Get-PrinterPort -Name $OldName -ErrorAction SilentlyContinue)) {
+                    Add-PrinterPort -Name $OldName
+                }
+                
+                Add-Printer -Name $CleanName -DriverName $Printer.DriverName -PortName $OldName
+                
+                Remove-Printer -Name $OldName
+                
+                Write-Host "Converted to: $CleanName" -ForegroundColor Gray
+            }
+            catch {
+                Write-Host " FAILED." -ForegroundColor Red
+                Write-Host "Error: $($_.Exception.Message)" -ForegroundColor Red
+            }
+        }
+        else {
+            Write-Host "Skipped $OldName" -ForegroundColor DarkGray
+        }
+    }
+}
+
 # Main script
 if (Request-AdminPrivileges) {
-    $action = Read-Host "Do you want to (I)nstall, (U)ninstall, or do (B)oth? Enter I, U, or B"
+    Write-Host "=================================== [ LEAP TOOLBOX ] ==================================="
+    $action = Read-Host "Do you want to (I)nstall, (U)ninstall, (B)oth, or (P)rint Crash Fix? Enter I, U, B, or P"
     
     switch ($action.ToUpper()) {
         "I" {
@@ -108,6 +156,9 @@ if (Request-AdminPrivileges) {
             Write-Host "Uninstalling and then installing LEAP..."
             Uninstall-LEAP
             Install-LEAP
+        }
+        "P" {
+            PrinterFix
         }
         default {
             Write-Host "Invalid option. Please run the script again and choose I, U, or B."
