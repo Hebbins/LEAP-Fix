@@ -1,6 +1,6 @@
 # LEAP Legal Software Repair Script
 
-Quickly do a **complete** reinstall of the LEAP Legal Software on the fly, with a 1 liner in PowerShell
+Quickly do a **complete** reinstall of the LEAP Legal Software on the fly, with a 1 liner in PowerShell.
 <hr />
 LEAP Legal Software has an uncanny ability to break, to the point where a typical reinstall will not resolve it. Having had this issue too many times to count, and the typical full reinstallation processing taking ~30 minutes / PC, I decided to script it.<br>
 This full reinstallation package fixing the majority of common issues and will save you hours of queue time waiting for a tech who's first task will be to do exactly this.<br/>
