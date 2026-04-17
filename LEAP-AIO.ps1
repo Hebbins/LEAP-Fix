@@ -1,18 +1,53 @@
-# Function to check and request administrative privileges
-function Request-AdminPrivileges {
-    if (-NOT ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole] "Administrator")) {
-        Write-Output "Not running with administrative privileges. Requesting elevation..."
-        Start-Process powershell.exe -Verb RunAs -ArgumentList "-NoProfile -ExecutionPolicy Bypass -Command `"iex (irm )`""
-        return $false
-    }
-    
-    Write-Output "Running with administrative privileges, moving on..."
-    return $true
+# --- Logging Function ---
+function Write-Log {
+    param([string]$Message, [string]$Color = "White")
+    $Timestamp = Get-Date -Format "HH:mm:ss"
+    Write-Host "[$Timestamp] $Message" -ForegroundColor $Color
 }
 
-# Function to uninstall LEAP
-function Uninstall-LEAP {
-    $leapProducts = Get-ItemProperty HKLM:\Software\Microsoft\Windows\CurrentVersion\Uninstall\* | 
+# --- Admin Escalation Logic ---
+function Request-AdminPrivileges {
+    if (-NOT ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole] "Administrator")) {
+        Write-Log "Action requires elevation. Requesting Administrative privileges..." "Yellow"
+        try {
+            Start-Process powershell.exe -Verb RunAs -ArgumentList "-NoProfile -ExecutionPolicy Bypass -File `"$PSCommandPath`""
+            exit # Close the non-admin window
+        } catch {
+            Write-Log "User declined or failed elevation. Cannot proceed with this task." "Red"
+            Read-Host "Press Enter to exit..."
+            exit
+        }
+    }
+}
+
+# --- Cleanup User AppData (Run before elevation) ---
+function Uninstall-UserFolders {
+    Write-Log "Starting User-level cleanup (No Admin required)..." "Cyan"
+    $userFolders = @(
+        "$env:APPDATA\4D",
+        "$env:APPDATA\LEAP*",
+        "$env:LOCALAPPDATA\LEAP*",
+        "$env:TEMP\4D",
+        "$env:TEMP\LEAP*",
+        "$env:LOCALAPPDATA\Microsoft_Corporation\LEAP*"
+    )
+    
+    foreach ($folderPattern in $userFolders) {
+        Get-ChildItem -Path $folderPattern -Directory -ErrorAction SilentlyContinue | ForEach-Object {
+            Write-Log "Deleting user folder: $($_.FullName)" "Gray"
+            Remove-Item -Path $_.FullName -Recurse -Force -ErrorAction SilentlyContinue
+        }
+    }
+    Write-Log "User-level folder cleanup complete." "Green"
+}
+
+# --- Uninstall System Components (Requires Admin) ---
+function Uninstall-LEAP-System {
+    Request-AdminPrivileges
+    Write-Log "Searching registry for LEAP product codes..." "Cyan"
+    
+    $leapProducts = Get-ItemProperty HKLM:\Software\Microsoft\Windows\CurrentVersion\Uninstall\*, 
+                                     HKLM:\SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall\* | 
                     Where-Object {$_.DisplayName -like "*LEAP*"}
     
     if ($leapProducts) {
@@ -21,149 +56,121 @@ function Uninstall-LEAP {
             $productCode = $product.PSChildName
             
             if ($productCode -match '^{[A-F0-9-]+}$') {
-                Write-Host "Uninstalling $displayName with Product Code: $productCode"
-                
-                try {
-                    $process = Start-Process -FilePath "msiexec.exe" -ArgumentList "/X $productCode /qn" -PassThru -Wait -NoNewWindow
-                    
-                    if ($process.ExitCode -eq 0) {
-                        Write-Host "$displayName uninstalled successfully."
-                    } else {
-                        Write-Host "Failed to uninstall $displayName. Exit code: $($process.ExitCode)"
-                    }
-                } catch {
-                    Write-Host "Error uninstalling {$displayName}: $_"
-                }
-            } else {
-                Write-Host "Invalid Product Code format for {$displayName}: $productCode"
+                Write-Log "Invoking MSIExec for $displayName..." "Yellow"
+                $process = Start-Process -FilePath "msiexec.exe" -ArgumentList "/X $productCode /qn" -PassThru -Wait -NoNewWindow
+                if ($process.ExitCode -eq 0) { Write-Log "Successfully uninstalled $displayName" "Green" }
+                else { Write-Log "Uninstaller failed for $displayName (Code: $($process.ExitCode))" "Red" }
             }
         }
-    } else {
-        Write-Host "No LEAP products found to uninstall."
     }
 
-    # Delete folders
-    $foldersToDelete = @(
-        "$env:APPDATA\4D",
-        "$env:APPDATA\LEAP*",
-        "$env:LOCALAPPDATA\LEAP*",
+    Write-Log "Cleaning up System-protected folders..." "Cyan"
+    $systemFolders = @(
         "$env:PROGRAMDATA\LEAP*",
         "$env:ProgramFiles\LEAP*",
-        "$env:ProgramFiles(x86)\LEAP*",
-        "$env:TEMP\4D",
-        "$env:TEMP\LEAP*",
-        "$env:LOCALAPPDATA\Microsoft_Corporation\LEAP*"
+        "$env:ProgramFiles(x86)\LEAP*"
     )
-    
-    foreach ($folderPattern in $foldersToDelete) {
-        Get-ChildItem -Path $folderPattern -Directory -ErrorAction SilentlyContinue | 
-        ForEach-Object {
+    foreach ($folderPattern in $systemFolders) {
+        Get-ChildItem -Path $folderPattern -Directory -ErrorAction SilentlyContinue | ForEach-Object {
+            Write-Log "Deleting system folder: $($_.FullName)" "Gray"
             Remove-Item -Path $_.FullName -Recurse -Force -ErrorAction SilentlyContinue
         }
     }
 }
 
-# Function to install LEAP
+# --- Acrobat Integration Fix ---
+function Acrobat-IntegrationFix {
+    Request-AdminPrivileges
+    $adobeProcesses = @("AcroRd32", "Acrobat")
+    $installerPath = "C:\ProgramData\LEAP Office\Cloud\Extras\Acrobat Extras\InstallLauncher.exe"
+
+    Write-Log "Monitoring Adobe processes..." "Cyan"
+    while (Get-Process | Where-Object { $adobeProcesses -contains $_.ProcessName }) {
+        Write-Log "Adobe is currently open. Please close it to proceed." "Yellow"
+        Read-Host "Press Enter after closing Adobe..."
+    }
+
+    if (Test-Path $installerPath) {
+        Write-Log "Launching Integration Installer..." "Cyan"
+        Start-Process -FilePath $installerPath -Wait
+        Write-Log "Integration Fix complete." "Green"
+    } else {
+        Write-Log "Error: Installer not found at $installerPath" "Red"
+    }
+}
+
+# --- LEAP Installer ---
 function Install-LEAP {
+    Request-AdminPrivileges
     $installerUrl = "https://github.com/Hebbins/LEAP-Fix/raw/main/LEAPDesktopX64Setup.exe"
     $installerPath = "$env:TEMP\LEAPDesktopX64Setup.exe"
     
-    Write-Host "Downloading LEAP installer from GitHub..."
-    
+    Write-Log "Connecting to GitHub for latest installer..." "Cyan"
+    [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
     try {
-        # Use TLS 1.2 for GitHub API compatibility
-        [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
-        
         Invoke-WebRequest -Uri $installerUrl -OutFile $installerPath
-        
-        if (Test-Path $installerPath) {
-            Write-Host "Download successful. Installing LEAP..."
-            Start-Process -FilePath $installerPath -ArgumentList "/S" -Wait
-            
-            # Clean up the installer
-            Remove-Item -Path $installerPath -Force
-            Write-Host "LEAP installation completed."
-        } else {
-            Write-Host "Error: Installer download failed. File not found."
-        }
+        Write-Log "Download finished. Starting silent installation..." "Cyan"
+        Start-Process -FilePath $installerPath -ArgumentList "/S" -Wait
+        Remove-Item $installerPath -Force
+        Write-Log "LEAP Installation finished successfully." "Green"
     } catch {
-        Write-Host "Error downloading or installing LEAP: $_"
+        Write-Log "Installation failed: $($_.Exception.Message)" "Red"
     }
 }
 
-# Poisoned Printers
+# --- Printer Fix (Runs as User) ---
 function PrinterFix {
-    # 1. Look for printers starting with \\
-    $AllPrinters = Get-Printer
-    $PoisonedPrinters = $AllPrinters | Where-Object { $_.Name -like "\\*" }
+    Write-Log "Scanning for network-pathed (poisoned) printers..." "Cyan"
+    $PoisonedPrinters = Get-Printer | Where-Object { $_.Name -like "\\*" }
 
-    if ($PoisonedPrinters.Count -eq 0) {
-        Write-Host "No Poisoned Printers Detected." -ForegroundColor Green
+    if (-not $PoisonedPrinters) {
+        Write-Log "No poisoned printers found. System is clean." "Green"
         return
     }
 
-    Write-Host "Detected $($PoisonedPrinters.Count) UNC-pathed printers that may cause winspool crashes." -ForegroundColor Yellow
-    Write-Host "------------------------------------------------"
-
-    # 2. Iterate through and ask for confirmation
     foreach ($Printer in $PoisonedPrinters) {
-        $OldName = $Printer.Name
-        $CleanName = $OldName.Replace("\\", "").Replace("\", "_") + " (Fixed)"
-        
-        Write-Host "`nFound: $OldName" -ForegroundColor White
-        $Choice = Read-Host "Would you like to convert this to a Local Port fix? [Y]es / [N]o"
-
-        if ($Choice -eq 'y' -or $Choice -eq 'yes') {
-            try {
-                Write-Host "Processing $OldName..." -NoNewline
-                
-                if (-not (Get-PrinterPort -Name $OldName -ErrorAction SilentlyContinue)) {
-                    Add-PrinterPort -Name $OldName
-                }
-                
-                Add-Printer -Name $CleanName -DriverName $Printer.DriverName -PortName $OldName
-                
-                Remove-Printer -Name $OldName
-                
-                Write-Host "Converted to: $CleanName" -ForegroundColor Gray
+        Write-Log "Found: $($Printer.Name)" "Yellow"
+        $Choice = Read-Host "Convert to Local Port fix? [Y/N]"
+        if ($Choice -eq 'y') {
+            Request-AdminPrivileges
+            # Logic continues after elevation if user selects Y
+            if (-not (Get-PrinterPort -Name $Printer.Name -ErrorAction SilentlyContinue)) {
+                Add-PrinterPort -Name $Printer.Name
             }
-            catch {
-                Write-Host " FAILED." -ForegroundColor Red
-                Write-Host "Error: $($_.Exception.Message)" -ForegroundColor Red
-            }
-        }
-        else {
-            Write-Host "Skipped $OldName" -ForegroundColor DarkGray
+            Add-Printer -Name ($Printer.Name.Replace("\\", "").Replace("\", "_") + " (Fixed)") -DriverName $Printer.DriverName -PortName $Printer.Name
+            Remove-Printer -Name $Printer.Name
+            Write-Log "Printer converted successfully." "Green"
         }
     }
 }
 
-# Main script
-if (Request-AdminPrivileges) {
-    Write-Host "=================================== [ LEAP TOOLBOX ] ==================================="
-    $action = Read-Host "Do you want to (I)nstall, (U)ninstall, (B)oth, or (P)rint Crash Fix? Enter I, U, B, or P"
-    
-    switch ($action.ToUpper()) {
-        "I" {
-            Write-Host "Installing LEAP..."
-            Install-LEAP
-        }
-        "U" {
-            Write-Host "Uninstalling LEAP..."
-            Uninstall-LEAP
-        }
-        "B" {
-            Write-Host "Uninstalling and then installing LEAP..."
-            Uninstall-LEAP
-            Install-LEAP
-        }
-        "P" {
-            PrinterFix
-        }
-        default {
-            Write-Host "Invalid option. Please run the script again and choose I, U, or B."
-        }
+# --- MAIN INTERFACE ---
+Clear-Host
+Write-Host "=================================== [ LEAP TOOLBOX ] ==================================="
+Write-Host "(I)nstall LEAP           - Requires Admin"
+Write-Host "(U)ninstall LEAP         - Cleans User AppData THEN requests Admin"
+Write-Host "(B)oth (Reinstall)       - Performs full clean and fresh install"
+Write-Host "(P)rint Crash Fix        - Run as User"
+Write-Host "(A)crobat Integration    - Requires Admin"
+Write-Host "========================================================================================"
+
+$action = Read-Host "Select an option"
+
+switch ($action.ToUpper()) {
+    "I" { Install-LEAP }
+    "U" { 
+        Uninstall-UserFolders
+        Uninstall-LEAP-System 
     }
-    
-    Write-Host "Operation completed."
+    "B" { 
+        Uninstall-UserFolders
+        Uninstall-LEAP-System
+        Install-LEAP 
+    }
+    "P" { PrinterFix }
+    "A" { Acrobat-IntegrationFix }
+    default { Write-Log "Invalid selection." "Red" }
 }
+
+Write-Log "Task Finished." "Green"
+Read-Host "Press Enter to exit..."
